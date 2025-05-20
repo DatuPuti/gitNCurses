@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <sstream>
 #include "GitCommandHandler.h"
+#include "Dialog.h"
+#include "json.hpp"
+#include <fstream>
 
 class GitNCurses
 {
@@ -26,16 +29,26 @@ private:
     int scrollPosition;                   // Track current scroll position
     std::vector<std::string> outputLines; // Store output lines for scrolling
     GitCommandHandler gitHandler;         // Add GitCommandHandler instance
+    Dialog dialog;                        // Add Dialog instance
+    nlohmann::json menuJson;
+    nlohmann::json helpJson;
+    int gPressedCount = 0; // Track consecutive 'g' presses for 'gg'
 
     struct MenuItem
     {
-        std::string name;
-        std::vector<std::string> submenu;
-        bool isDynamic;                          // Flag to indicate if submenu should be dynamically populated
-        std::vector<std::string> dynamicSubmenu; // For nested dynamic submenus
+        std::string label;
+        std::string command;
+        std::string description;
+        std::vector<std::string> dynamicItems; // For dynamic submenus (e.g., branch list)
     };
 
-    std::vector<MenuItem> mainMenu;
+    struct Menu
+    {
+        std::string name;
+        std::vector<MenuItem> items;
+    };
+
+    std::vector<Menu> mainMenu;
     int selectedMenu;
     bool showSubmenu;
     int selectedSubmenu;
@@ -217,11 +230,8 @@ private:
         keypad(statusWin, TRUE);
 
         // Initialize menu structure
-        mainMenu = {
-            {"File", {"Exit"}},
-            {"Branch", {"Status", "Branch", "Log", "Add", "Commit", "Push", "Pull"}},
-            {"Git", {"Create Branch", "Rename Branch", "Delete Local Branch", "Checkout Remote", "List All Branches", "Merge Branch", "Switch Branch", "Stash Changes", "Stash Pop"}},
-            {"Help", {"Help"}}};
+        loadJsonFiles();
+        buildMenusFromJson();
 
         // Initialize local branches
         updateLocalBranches();
@@ -276,7 +286,24 @@ private:
             x += mainMenu[i].name.length() + 2;
         }
 
-        // Redraw main windows first
+        // --- Clear submenu/dynamic submenu area below menu bar ---
+        int menuAreaHeight = 20; // Adjust as needed for max submenu height
+        for (int y = 3; y < 3 + menuAreaHeight && y < maxY; ++y)
+        {
+            mvwhline(stdscr, y, 0, ' ', maxX);
+        }
+        wnoutrefresh(stdscr);
+
+        // Variables for submenu position (needed for dynamic submenu)
+        int submenuWidth = 20;
+        int submenuX = 2;
+        for (size_t i = 0; i < selectedMenu; i++)
+        {
+            submenuX += mainMenu[i].name.length() + 2;
+        }
+        int submenuY = 3;
+
+        // Redraw main windows to ensure no ghosting
         box(outputWin, 0, 0);
         box(inputWin, 0, 0);
         wrefresh(outputWin);
@@ -284,26 +311,15 @@ private:
         wrefresh(statusWin);
         wrefresh(menuWin);
 
-        // Draw submenu if active
+        // Draw submenu if active (after main windows, so it's on top)
+        WINDOW *submenuWin = nullptr;
         if (showSubmenu)
         {
-            // Calculate submenu position
-            int submenuWidth = 20;
-            int submenuHeight = mainMenu[selectedMenu].submenu.size() + 2;
-            int submenuX = 2;
-            for (size_t i = 0; i < selectedMenu; i++)
-            {
-                submenuX += mainMenu[i].name.length() + 2;
-            }
-            int submenuY = 3;
-
-            // Create and draw main submenu
-            WINDOW *submenuWin = newwin(submenuHeight, submenuWidth, submenuY, submenuX);
+            int submenuHeight = mainMenu[selectedMenu].items.size() + 2;
+            submenuWin = newwin(submenuHeight, submenuWidth, submenuY, submenuX);
             wbkgd(submenuWin, COLOR_PAIR(3));
             box(submenuWin, 0, 0);
-
-            // Draw submenu items
-            for (size_t i = 0; i < mainMenu[selectedMenu].submenu.size(); i++)
+            for (size_t i = 0; i < mainMenu[selectedMenu].items.size(); i++)
             {
                 if (i == selectedSubmenu)
                 {
@@ -313,43 +329,47 @@ private:
                 {
                     wattron(submenuWin, COLOR_PAIR(3));
                 }
-                mvwprintw(submenuWin, i + 1, 1, "%s", mainMenu[selectedMenu].submenu[i].c_str());
+                mvwprintw(submenuWin, i + 1, 1, "%s", mainMenu[selectedMenu].items[i].label.c_str());
                 wattroff(submenuWin, COLOR_PAIR(3) | COLOR_PAIR(4));
             }
             wrefresh(submenuWin);
-
-            // Draw dynamic submenu if active
-            if (showDynamicSubmenu && mainMenu[selectedMenu].submenu[selectedSubmenu] == "Switch Branch")
-            {
-                int dynamicSubmenuWidth = 30;
-                int dynamicSubmenuHeight = mainMenu[selectedMenu].dynamicSubmenu.size() + 2;
-                int dynamicSubmenuX = submenuX + submenuWidth;
-                int dynamicSubmenuY = submenuY + selectedSubmenu + 1;
-
-                WINDOW *dynamicSubmenuWin = newwin(dynamicSubmenuHeight, dynamicSubmenuWidth,
-                                                   dynamicSubmenuY, dynamicSubmenuX);
-                wbkgd(dynamicSubmenuWin, COLOR_PAIR(3));
-                box(dynamicSubmenuWin, 0, 0);
-
-                for (size_t i = 0; i < mainMenu[selectedMenu].dynamicSubmenu.size(); i++)
-                {
-                    if (i == selectedDynamicSubmenu)
-                    {
-                        wattron(dynamicSubmenuWin, COLOR_PAIR(4));
-                    }
-                    else
-                    {
-                        wattron(dynamicSubmenuWin, COLOR_PAIR(3));
-                    }
-                    mvwprintw(dynamicSubmenuWin, i + 1, 1, "%s", mainMenu[selectedMenu].dynamicSubmenu[i].c_str());
-                    wattroff(dynamicSubmenuWin, COLOR_PAIR(3) | COLOR_PAIR(4));
-                }
-                wrefresh(dynamicSubmenuWin);
-                delwin(dynamicSubmenuWin);
-            }
-
-            delwin(submenuWin);
         }
+
+        // Draw dynamic submenu if active (after main windows and submenu)
+        WINDOW *dynamicSubmenuWin = nullptr;
+        if (showDynamicSubmenu && !mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems.empty())
+        {
+            int dynamicSubmenuWidth = 30;
+            int dynamicSubmenuHeight = mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems.size() + 2;
+            int dynamicSubmenuX = submenuX + submenuWidth;
+            int dynamicSubmenuY = submenuY + selectedSubmenu + 1;
+
+            dynamicSubmenuWin = newwin(dynamicSubmenuHeight, dynamicSubmenuWidth,
+                                       dynamicSubmenuY, dynamicSubmenuX);
+            wbkgd(dynamicSubmenuWin, COLOR_PAIR(3));
+            box(dynamicSubmenuWin, 0, 0);
+
+            for (size_t i = 0; i < mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems.size(); i++)
+            {
+                if (i == selectedDynamicSubmenu)
+                {
+                    wattron(dynamicSubmenuWin, COLOR_PAIR(4));
+                }
+                else
+                {
+                    wattron(dynamicSubmenuWin, COLOR_PAIR(3));
+                }
+                mvwprintw(dynamicSubmenuWin, i + 1, 1, "%s", mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems[i].c_str());
+                wattroff(dynamicSubmenuWin, COLOR_PAIR(3) | COLOR_PAIR(4));
+            }
+            wrefresh(dynamicSubmenuWin);
+        }
+
+        // Now delete submenu windows if they were created
+        if (dynamicSubmenuWin)
+            delwin(dynamicSubmenuWin);
+        if (submenuWin)
+            delwin(submenuWin);
 
         // Force a final refresh to ensure everything is visible
         doupdate();
@@ -357,53 +377,16 @@ private:
 
     std::string getMenuDescription(const std::string &menu, const std::string &submenu)
     {
-        if (menu == "File")
+        for (const auto &m : mainMenu)
         {
-            if (submenu == "Exit")
-                return "Exit the application";
-        }
-        else if (menu == "Branch")
-        {
-            if (submenu == "Status")
-                return "Show working tree status";
-            else if (submenu == "Branch")
-                return "List or create branches";
-            else if (submenu == "Log")
-                return "Show commit history";
-            else if (submenu == "Add")
-                return "Add files to staging area";
-            else if (submenu == "Commit")
-                return "Commit staged changes";
-            else if (submenu == "Push")
-                return "Push commits to remote";
-            else if (submenu == "Pull")
-                return "Pull changes from remote";
-        }
-        else if (menu == "Git")
-        {
-            if (submenu == "Create Branch")
-                return "Create a new branch";
-            else if (submenu == "Rename Branch")
-                return "Rename current branch";
-            else if (submenu == "Delete Local Branch")
-                return "Delete a local branch";
-            else if (submenu == "Checkout Remote")
-                return "Checkout a remote branch";
-            else if (submenu == "List All Branches")
-                return "Show all local and remote branches";
-            else if (submenu == "Merge Branch")
-                return "Merge another branch into current";
-            else if (submenu == "Switch Branch")
-                return "Switch to another branch";
-            else if (submenu == "Stash Changes")
-                return "Save changes temporarily";
-            else if (submenu == "Stash Pop")
-                return "Apply stashed changes";
-        }
-        else if (menu == "Help")
-        {
-            if (submenu == "Help")
-                return "Show help information";
+            if (m.name == menu)
+            {
+                for (const auto &item : m.items)
+                {
+                    if (item.label == submenu)
+                        return item.description;
+                }
+            }
         }
         return "";
     }
@@ -419,7 +402,7 @@ private:
         if (showSubmenu)
         {
             description = getMenuDescription(mainMenu[selectedMenu].name,
-                                             mainMenu[selectedMenu].submenu[selectedSubmenu]);
+                                             mainMenu[selectedMenu].items[selectedSubmenu].label);
         }
 
         // Format status bar content
@@ -439,16 +422,15 @@ private:
     void updateLocalBranches()
     {
         // Update the dynamic submenu for Switch Branch
-        for (auto &item : mainMenu)
+        for (auto &menu : mainMenu)
         {
-            if (item.name == "Git")
+            if (menu.name == "Git" || menu.name == "Branch")
             {
-                for (size_t i = 0; i < item.submenu.size(); i++)
+                for (auto &item : menu.items)
                 {
-                    if (item.submenu[i] == "Switch Branch")
+                    if (item.label == "Switch Branch" || item.label == "Checkout")
                     {
-                        item.dynamicSubmenu = gitHandler.getLocalBranches();
-                        break;
+                        item.dynamicItems = gitHandler.getLocalBranches();
                     }
                 }
             }
@@ -510,9 +492,24 @@ private:
     {
         bool menuChanged = false;
         bool contentChanged = false;
+        static int gPressed = 0; // static to persist between calls
 
         switch (ch)
         {
+        case '\t': // Tab key toggles between menu and output (scroll) mode
+            gPressed = 0;
+            if (isMenuActive)
+            {
+                isMenuActive = false;
+                activeWindow = outputWin;
+            }
+            else
+            {
+                isMenuActive = true;
+                activeWindow = menuWin;
+            }
+            drawMenu();
+            break;
         case 'i':
         case 'I':
             if (isMenuActive)
@@ -543,15 +540,66 @@ private:
                 menuChanged = true;
             }
             break;
-        case KEY_UP:
-            if (showDynamicSubmenu && isMenuActive)
+        case 'g':
+            if (!isMenuActive && !showSubmenu && !showDynamicSubmenu)
             {
-                selectedDynamicSubmenu = (selectedDynamicSubmenu - 1 + mainMenu[selectedMenu].dynamicSubmenu.size()) % mainMenu[selectedMenu].dynamicSubmenu.size();
+                if (gPressed == 1)
+                {
+                    // 'gg' pressed: go to top
+                    scrollPosition = 0;
+                    contentChanged = true;
+                    gPressed = 0;
+                }
+                else
+                {
+                    gPressed = 1;
+                }
+            }
+            break;
+        case 'G':
+            if (!isMenuActive && !showSubmenu && !showDynamicSubmenu)
+            {
+                int visibleLines = getmaxy(outputWin) - 2;
+                scrollPosition = std::max(0, static_cast<int>(outputLines.size()) - visibleLines);
+                contentChanged = true;
+            }
+            gPressed = 0;
+            break;
+        case 'j':
+        case 'J':
+            gPressed = 0;
+            if (!isMenuActive && !showSubmenu && !showDynamicSubmenu)
+            {
+                int visibleLines = getmaxy(outputWin) - 2;
+                if (scrollPosition < static_cast<int>(outputLines.size()) - visibleLines)
+                {
+                    scrollPosition++;
+                    contentChanged = true;
+                }
+            }
+            break;
+        case 'k':
+        case 'K':
+            gPressed = 0;
+            if (!isMenuActive && !showSubmenu && !showDynamicSubmenu)
+            {
+                if (scrollPosition > 0)
+                {
+                    scrollPosition--;
+                    contentChanged = true;
+                }
+            }
+            break;
+        case KEY_UP:
+            if (showDynamicSubmenu && isMenuActive && !mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems.empty())
+            {
+                int dynSize = mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems.size();
+                selectedDynamicSubmenu = (selectedDynamicSubmenu - 1 + dynSize) % dynSize;
                 menuChanged = true;
             }
             else if (showSubmenu && isMenuActive)
             {
-                selectedSubmenu = (selectedSubmenu - 1 + mainMenu[selectedMenu].submenu.size()) % mainMenu[selectedMenu].submenu.size();
+                selectedSubmenu = (selectedSubmenu - 1 + mainMenu[selectedMenu].items.size()) % mainMenu[selectedMenu].items.size();
                 showDynamicSubmenu = false;
                 menuChanged = true;
             }
@@ -566,14 +614,15 @@ private:
             }
             break;
         case KEY_DOWN:
-            if (showDynamicSubmenu && isMenuActive)
+            if (showDynamicSubmenu && isMenuActive && !mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems.empty())
             {
-                selectedDynamicSubmenu = (selectedDynamicSubmenu + 1) % mainMenu[selectedMenu].dynamicSubmenu.size();
+                int dynSize = mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems.size();
+                selectedDynamicSubmenu = (selectedDynamicSubmenu + 1) % dynSize;
                 menuChanged = true;
             }
             else if (showSubmenu && isMenuActive)
             {
-                selectedSubmenu = (selectedSubmenu + 1) % mainMenu[selectedMenu].submenu.size();
+                selectedSubmenu = (selectedSubmenu + 1) % mainMenu[selectedMenu].items.size();
                 showDynamicSubmenu = false;
                 menuChanged = true;
             }
@@ -591,31 +640,38 @@ private:
         case '\n':
             if (!showSubmenu && isMenuActive)
             {
-                showSubmenu = true;
-                selectedSubmenu = 0;
-                showDynamicSubmenu = false;
-                menuChanged = true;
-                if (mainMenu[selectedMenu].name == "Git")
+                if (mainMenu[selectedMenu].name == "Help")
                 {
+                    executeMenuCommand("help");
+                }
+                else
+                {
+                    showSubmenu = true;
+                    selectedSubmenu = 0;
+                    menuChanged = true;
+                    // Update dynamic items if needed
                     updateLocalBranches();
                 }
             }
-            else if (!showDynamicSubmenu && mainMenu[selectedMenu].submenu[selectedSubmenu] == "Switch Branch" && isMenuActive)
+            else if (!showDynamicSubmenu && isMenuActive && !mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems.empty())
             {
                 showDynamicSubmenu = true;
                 selectedDynamicSubmenu = 0;
                 menuChanged = true;
             }
-            else if (showDynamicSubmenu && isMenuActive)
+            else if (showDynamicSubmenu && isMenuActive && !mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems.empty())
             {
-                executeMenuCommand(mainMenu[selectedMenu].dynamicSubmenu[selectedDynamicSubmenu]);
+                // Execute command for selected dynamic item (e.g., checkout branch)
+                std::string baseCmd = mainMenu[selectedMenu].items[selectedSubmenu].command;
+                std::string dynArg = mainMenu[selectedMenu].items[selectedSubmenu].dynamicItems[selectedDynamicSubmenu];
+                executeMenuCommand(baseCmd + " " + dynArg);
                 showDynamicSubmenu = false;
                 showSubmenu = false;
                 menuChanged = true;
             }
             else if (showSubmenu && isMenuActive)
             {
-                executeMenuCommand(mainMenu[selectedMenu].submenu[selectedSubmenu]);
+                executeMenuCommand(mainMenu[selectedMenu].items[selectedSubmenu].command);
                 showSubmenu = false;
                 menuChanged = true;
             }
@@ -651,6 +707,9 @@ private:
                 contentChanged = true;
             }
             break;
+        default:
+            gPressed = 0;
+            break;
         }
 
         if (menuChanged)
@@ -682,18 +741,352 @@ private:
             endwin();
             exit(0);
         }
+        else if (cmd == "help")
+        {
+            displayOutput(getHelpText());
+            updateStatusBar();
+            return;
+        }
 
         std::string output;
         if (cmd == "commit")
         {
-            auto result = showCommitDialog();
+            auto result = dialog.show("Commit Message", "Please provide a commit message:");
             if (result.confirmed)
             {
-                output = gitHandler.executeCommand("commit " + result.input);
+                output = gitHandler.executeCommand("commit -m \"" + result.input + "\"");
             }
             else
             {
-                // Return to menu without executing commit
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "add")
+        {
+            auto result = dialog.show("Add Files", "Enter file(s) to add (use * for all):");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("add " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "branch")
+        {
+            auto result = dialog.show("Create Branch", "Enter new branch name:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("branch " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "checkout")
+        {
+            auto result = dialog.show("Checkout", "Enter branch name to checkout:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("checkout " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "merge")
+        {
+            auto result = dialog.show("Merge", "Enter branch name to merge:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("merge " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "tag")
+        {
+            auto result = dialog.show("Create Tag", "Enter tag name:");
+            if (result.confirmed)
+            {
+                std::string tagName = result.input;
+                auto messageResult = dialog.show("Tag Message", "Enter tag message:");
+                if (messageResult.confirmed)
+                {
+                    output = gitHandler.executeCommand("tag -a " + tagName + " -m \"" + messageResult.input + "\"");
+                }
+                else
+                {
+                    drawMenu();
+                    updateStatusBar();
+                    return;
+                }
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "push")
+        {
+            auto result = dialog.show("Push", "Enter remote and branch (e.g., origin main):");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("push " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "pull")
+        {
+            auto result = dialog.show("Pull", "Enter remote and branch (e.g., origin main):");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("pull " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "stash")
+        {
+            auto result = dialog.show("Stash", "Enter stash message (optional):");
+            if (result.confirmed)
+            {
+                if (result.input.empty())
+                {
+                    output = gitHandler.executeCommand("stash");
+                }
+                else
+                {
+                    output = gitHandler.executeCommand("stash push -m \"" + result.input + "\"");
+                }
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "stash pop")
+        {
+            output = gitHandler.executeCommand("stash pop");
+        }
+        else if (cmd == "stash list")
+        {
+            output = gitHandler.executeCommand("stash list");
+        }
+        else if (cmd == "reset")
+        {
+            auto result = dialog.show("Reset", "Enter commit hash or HEAD~n:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("reset " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "revert")
+        {
+            auto result = dialog.show("Revert", "Enter commit hash to revert:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("revert " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "cherry-pick")
+        {
+            auto result = dialog.show("Cherry-pick", "Enter commit hash to cherry-pick:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("cherry-pick " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "rebase")
+        {
+            auto result = dialog.show("Rebase", "Enter branch to rebase onto:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("rebase " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "remote add")
+        {
+            auto nameResult = dialog.show("Remote Name", "Enter remote name (e.g., origin):");
+            if (nameResult.confirmed)
+            {
+                auto urlResult = dialog.show("Remote URL", "Enter remote URL:");
+                if (urlResult.confirmed)
+                {
+                    output = gitHandler.executeCommand("remote add " + nameResult.input + " " + urlResult.input);
+                }
+                else
+                {
+                    drawMenu();
+                    updateStatusBar();
+                    return;
+                }
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "remote remove")
+        {
+            auto result = dialog.show("Remove Remote", "Enter remote name to remove:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("remote remove " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "remote -v")
+        {
+            output = gitHandler.executeCommand("remote -v");
+        }
+        else if (cmd == "log")
+        {
+            output = gitHandler.executeCommand("log --oneline --graph --all");
+        }
+        else if (cmd == "status")
+        {
+            output = gitHandler.executeCommand("status");
+        }
+        else if (cmd == "diff")
+        {
+            output = gitHandler.executeCommand("diff");
+        }
+        else if (cmd == "show")
+        {
+            auto result = dialog.show("Show Commit", "Enter commit hash:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("show " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "blame")
+        {
+            auto result = dialog.show("Blame", "Enter file path:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("blame " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "clean")
+        {
+            auto result = dialog.show("Clean", "Enter -f to force, -d for directories, -x for ignored files:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("clean " + result.input);
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "fetch")
+        {
+            auto result = dialog.show("Fetch", "Enter remote name (optional):");
+            if (result.confirmed)
+            {
+                if (result.input.empty())
+                {
+                    output = gitHandler.executeCommand("fetch --all");
+                }
+                else
+                {
+                    output = gitHandler.executeCommand("fetch " + result.input);
+                }
+            }
+            else
+            {
+                drawMenu();
+                updateStatusBar();
+                return;
+            }
+        }
+        else if (cmd == "init")
+        {
+            output = gitHandler.executeCommand("init");
+        }
+        else if (cmd == "clone")
+        {
+            auto result = dialog.show("Clone", "Enter repository URL:");
+            if (result.confirmed)
+            {
+                output = gitHandler.executeCommand("clone " + result.input);
+            }
+            else
+            {
                 drawMenu();
                 updateStatusBar();
                 return;
@@ -707,9 +1100,6 @@ private:
         displayOutput(output);
         updateStatusBar();
 
-        // Keep menu active and visible
-        isMenuActive = true;
-        activeWindow = menuWin;
         drawMenu();
     }
 
@@ -796,6 +1186,50 @@ private:
         }
 
         return command;
+    }
+
+    void loadJsonFiles()
+    {
+        std::ifstream menuFile("menus.json");
+        if (menuFile)
+            menuFile >> menuJson;
+        std::ifstream helpFile("help.json");
+        if (helpFile)
+            helpFile >> helpJson;
+    }
+
+    void buildMenusFromJson()
+    {
+        mainMenu.clear();
+        for (const auto &menu : menuJson["menus"])
+        {
+            Menu m;
+            m.name = menu["name"].get<std::string>();
+            for (const auto &item : menu["items"])
+            {
+                MenuItem mi;
+                mi.label = item["label"].get<std::string>();
+                mi.command = item["command"].get<std::string>();
+                mi.description = item["description"].get<std::string>();
+                m.items.push_back(mi);
+            }
+            mainMenu.push_back(m);
+        }
+    }
+
+    std::string getHelpText()
+    {
+        std::ostringstream oss;
+        for (const auto &section : helpJson["help"])
+        {
+            oss << section["section"].get<std::string>() << ":\n";
+            for (const auto &line : section["content"])
+            {
+                oss << "  " << line.get<std::string>() << "\n";
+            }
+            oss << "\n";
+        }
+        return oss.str();
     }
 
 public:

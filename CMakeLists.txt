@@ -12,6 +12,7 @@ include_directories(${CURSES_INCLUDE_DIR})
 add_executable(gitNCurses 
     src/main.cpp
     src/GitCommandHandler.cpp
+    src/Dialog.cpp
 )
 
 # Link libraries

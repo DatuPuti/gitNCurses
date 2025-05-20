@@ -1,0 +1,88 @@
+{
+    "help": [
+        {
+            "section": "Navigation (Menu and Output)",
+            "content": [
+                "Arrow keys: Navigate menus and submenus",
+                "Enter: Select menu item",
+                "ESC: Go back or close submenu",
+                "Tab: Toggle between menu and output (scroll) mode",
+                "i: Enter input mode to type a custom git command"
+            ]
+        },
+        {
+            "section": "Output Window Navigation (Vim-style)",
+            "content": [
+                "j: Scroll down one line",
+                "k: Scroll up one line",
+                "gg: Jump to top of output",
+                "G: Jump to bottom of output",
+                "Page Up/Page Down: Scroll by page"
+            ]
+        },
+        {
+            "section": "Basic Git Commands",
+            "content": [
+                "status: Show working tree status",
+                "add: Add files to staging area (prompt for files)",
+                "commit: Commit staged changes (prompt for message)",
+                "init: Initialize new repository",
+                "clone: Clone a repository (prompt for URL)",
+                "clean: Remove untracked files (prompt for options)"
+            ]
+        },
+        {
+            "section": "Branch Operations",
+            "content": [
+                "branch: Create a new branch (prompt for name)",
+                "checkout: Switch to another branch (prompt for name or via dynamic submenu)",
+                "merge: Merge another branch into current (prompt for branch)",
+                "rebase: Reapply commits on top of another branch (prompt for branch)"
+            ]
+        },
+        {
+            "section": "Remote Operations",
+            "content": [
+                "remote add: Add a new remote repository (prompt for name and URL)",
+                "remote remove: Remove a remote repository (prompt for name)",
+                "remote -v: List all remote repositories",
+                "push: Push commits to remote (prompt for remote and branch)",
+                "pull: Pull changes from remote (prompt for remote and branch)",
+                "fetch: Download objects and refs from remote (prompt for remote or all)"
+            ]
+        },
+        {
+            "section": "History and Diff",
+            "content": [
+                "log: Show commit history with graph",
+                "diff: Show changes between commits",
+                "show: Show commit details (prompt for commit hash)",
+                "blame: Show file history with line-by-line changes (prompt for file)",
+                "reset: Reset HEAD to specified commit (prompt for commit)",
+                "revert: Create new commit that undoes changes (prompt for commit)",
+                "cherry-pick: Apply changes from another commit (prompt for commit)"
+            ]
+        },
+        {
+            "section": "Stash Operations",
+            "content": [
+                "stash: Save changes temporarily (prompt for optional message)",
+                "stash pop: Apply and remove most recent stash",
+                "stash list: List all stashed changes"
+            ]
+        },
+        {
+            "section": "Tag Operations",
+            "content": [
+                "tag: Create an annotated tag (prompt for tag name and message)"
+            ]
+        },
+        {
+            "section": "Custom Commands",
+            "content": [
+                "Press 'i' to enter any git command directly",
+                "Command history is maintained"
+            ]
+        }
+    ]
+}

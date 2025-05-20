@@ -1,0 +1,189 @@
+{
+    "menus": [
+        {
+            "name": "File",
+            "items": [
+                {
+                    "label": "Exit",
+                    "command": "exit",
+                    "description": "Exit the application"
+                }
+            ]
+        },
+        {
+            "name": "Repository",
+            "items": [
+                {
+                    "label": "Status",
+                    "command": "status",
+                    "description": "Show working tree status"
+                },
+                {
+                    "label": "Add",
+                    "command": "add",
+                    "description": "Add files to staging area"
+                },
+                {
+                    "label": "Commit",
+                    "command": "commit",
+                    "description": "Commit staged changes"
+                },
+                {
+                    "label": "Init",
+                    "command": "init",
+                    "description": "Initialize new repository"
+                },
+                {
+                    "label": "Clone",
+                    "command": "clone",
+                    "description": "Clone a repository into new directory"
+                },
+                {
+                    "label": "Clean",
+                    "command": "clean",
+                    "description": "Remove untracked files"
+                }
+            ]
+        },
+        {
+            "name": "Branch",
+            "items": [
+                {
+                    "label": "Branch",
+                    "command": "branch",
+                    "description": "List or create branches"
+                },
+                {
+                    "label": "Checkout",
+                    "command": "checkout",
+                    "description": "Switch to another branch"
+                },
+                {
+                    "label": "Merge",
+                    "command": "merge",
+                    "description": "Merge another branch into current"
+                },
+                {
+                    "label": "Rebase",
+                    "command": "rebase",
+                    "description": "Reapply commits on top of another branch"
+                }
+            ]
+        },
+        {
+            "name": "Remote",
+            "items": [
+                {
+                    "label": "Remote Add",
+                    "command": "remote add",
+                    "description": "Add a new remote repository"
+                },
+                {
+                    "label": "Remote Remove",
+                    "command": "remote remove",
+                    "description": "Remove a remote repository"
+                },
+                {
+                    "label": "Remote List",
+                    "command": "remote -v",
+                    "description": "List all remote repositories"
+                },
+                {
+                    "label": "Push",
+                    "command": "push",
+                    "description": "Push commits to remote"
+                },
+                {
+                    "label": "Pull",
+                    "command": "pull",
+                    "description": "Pull changes from remote"
+                },
+                {
+                    "label": "Fetch",
+                    "command": "fetch",
+                    "description": "Download objects and refs from remote"
+                }
+            ]
+        },
+        {
+            "name": "History",
+            "items": [
+                {
+                    "label": "Log",
+                    "command": "log",
+                    "description": "Show commit history with graph"
+                },
+                {
+                    "label": "Diff",
+                    "command": "diff",
+                    "description": "Show changes between commits"
+                },
+                {
+                    "label": "Show",
+                    "command": "show",
+                    "description": "Show commit details"
+                },
+                {
+                    "label": "Blame",
+                    "command": "blame",
+                    "description": "Show file history with line-by-line changes"
+                },
+                {
+                    "label": "Reset",
+                    "command": "reset",
+                    "description": "Reset HEAD to specified commit"
+                },
+                {
+                    "label": "Revert",
+                    "command": "revert",
+                    "description": "Create new commit that undoes changes"
+                },
+                {
+                    "label": "Cherry-pick",
+                    "command": "cherry-pick",
+                    "description": "Apply changes from another commit"
+                }
+            ]
+        },
+        {
+            "name": "Stash",
+            "items": [
+                {
+                    "label": "Stash",
+                    "command": "stash",
+                    "description": "Save changes temporarily with optional message"
+                },
+                {
+                    "label": "Stash Pop",
+                    "command": "stash pop",
+                    "description": "Apply and remove most recent stash"
+                },
+                {
+                    "label": "Stash List",
+                    "command": "stash list",
+                    "description": "List all stashed changes"
+                }
+            ]
+        },
+        {
+            "name": "Tag",
+            "items": [
+                {
+                    "label": "Tag",
+                    "command": "tag",
+                    "description": "Create an annotated tag"
+                }
+            ]
+        },
+        {
+            "name": "Help",
+            "items": [
+                {
+                    "label": "Help",
+                    "command": "help",
+                    "description": "Show help information"
+                }
+            ]
+        }
+    ]
+}
